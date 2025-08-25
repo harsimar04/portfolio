@@ -2,6 +2,8 @@ pipeline {
     agent any
 
     environment {
+        REMOTE_USER = "ubuntu"
+        REMOTE_HOST = "13.233.117.66"
         DEPLOY_DIR = "/var/www/portfolio"
         BACKUP_DIR = "/var/www/portfolio_backup"
     }
@@ -9,39 +11,32 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'git@github.com:username/your-portfolio.git', credentialsId: 'github-ssh-key'
+                git branch: 'main', url: 'git@github.com:harsimar04/portfolio.git', credentialsId: 'github-ssh-key'
             }
         }
 
-        stage('Install Dependencies') {
+        stage('Install & Build') {
             steps {
                 sh 'npm install'
-            }
-        }
-
-        stage('Build') {
-            steps {
                 sh 'npm run build'
             }
         }
 
-        stage('Backup Old Deployment') {
+        stage('Deploy to Remote') {
             steps {
-                sh '''
-                if [ -d $DEPLOY_DIR ]; then
-                    rm -rf $BACKUP_DIR
-                    mv $DEPLOY_DIR $BACKUP_DIR
-                fi
-                '''
-            }
-        }
-
-        stage('Deploy') {
-            steps {
-                sh '''
-                cp -r dist $DEPLOY_DIR
-                sudo chown -R www-data:www-data $DEPLOY_DIR
-                '''
+                sshagent(credentials: ['portfolio-ssh-key']) {
+                    sh """
+                    ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST '
+                        if [ -d $DEPLOY_DIR ]; then
+                            rm -rf $BACKUP_DIR
+                            mv $DEPLOY_DIR $BACKUP_DIR
+                        fi
+                        mkdir -p $DEPLOY_DIR
+                    '
+                    scp -r dist/* $REMOTE_USER@$REMOTE_HOST:$DEPLOY_DIR/
+                    ssh $REMOTE_USER@$REMOTE_HOST 'sudo chown -R www-data:www-data $DEPLOY_DIR'
+                    """
+                }
             }
         }
     }
@@ -51,13 +46,7 @@ pipeline {
             echo 'Deployment Successful!'
         }
         failure {
-            echo 'Deployment Failed! Restoring backup...'
-            sh '''
-            if [ -d $BACKUP_DIR ]; then
-                rm -rf $DEPLOY_DIR
-                mv $BACKUP_DIR $DEPLOY_DIR
-            fi
-            '''
+            echo 'Deployment Failed!'
         }
     }
 }
